@@ -30,12 +30,14 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.OverScroller;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -45,6 +47,7 @@ import java.util.ArrayList;
 public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureDetector.OnScaleGestureListener{
 
     private ScaleGestureDetector gestureScale;
+    private GestureDetector gestureDetector;
     private float scaleFactor = 1;
     private float minScale = 0.5f;
     private float maxScale = 2.0f;
@@ -60,6 +63,7 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
 
     private int mTouchSlop;
     private boolean isScrolling = false;
+    private OverScroller scroller;
 
     private FixedHeaderSubTableLayout mainTable;
     private FixedHeaderSubTableLayout columnHeaderTable;
@@ -129,6 +133,8 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         // enable ViewGroup drawing so the scrollbars show
         setWillNotDraw(false);
         gestureScale = new ScaleGestureDetector(context, this);
+        scroller = new OverScroller(context);
+        gestureDetector = new GestureDetector(context, new GestureListener());
     }
 
     @SuppressWarnings({"UnusedDeclaration"})
@@ -393,7 +399,7 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         return result;
     }
 
-        @Override
+    @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         /* Work out if this ViewGroup needs the event to scroll/scale
          *  This has to be done here instead of onInterceptTouchEvent
@@ -403,6 +409,7 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
 
         // Let the ScaleGestureDetector inspect all events
         gestureScale.onTouchEvent(ev);
+        gestureDetector.onTouchEvent(ev);
 
         if (gestureScale.isInProgress()) {
             // Need to cancel anything we have sent to the children
@@ -420,6 +427,8 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
             case MotionEvent.ACTION_DOWN: {
                 final float x = ev.getX();
                 final float y = ev.getY();
+
+                scroller.forceFinished(true);
 
                 mLastTouchX = x;
                 mLastTouchY = y;
@@ -613,5 +622,47 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
     @Override
     protected int computeVerticalScrollOffset() {
         return (int) -panY;
+    }
+
+    @Override
+    public void computeScroll() {
+        super.computeScroll();
+        if (scroller.computeScrollOffset()) {
+            float dx = panX - scroller.getCurrX();
+            float dy = panY - scroller.getCurrY();
+            calculatePanScale(dx, dy, 0, 0, 1);
+            postInvalidateOnAnimation();
+        }
+    }
+
+    private void startFling(float velocityX, float velocityY) {
+        int width = getWidth();
+        int height = getHeight();
+        float maxPanX = -(scaledRightBound - width);
+        float maxPanY = -(scaledBottomBound - height);
+        int minX = (int) Math.min(maxPanX, 0);
+        int minY = (int) Math.min(maxPanY, 0);
+
+        scroller.fling((int) panX, (int) panY,
+                (int) velocityX, (int) velocityY,
+                minX, 0,
+                minY, 0);
+        postInvalidateOnAnimation();
+    }
+
+    private class GestureListener extends GestureDetector.SimpleOnGestureListener {
+        @Override
+        public boolean onDown(MotionEvent e) {
+            return true;
+        }
+
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+            if (!gestureScale.isInProgress()) {
+                startFling(velocityX, velocityY);
+                return true;
+            }
+            return false;
+        }
     }
 }

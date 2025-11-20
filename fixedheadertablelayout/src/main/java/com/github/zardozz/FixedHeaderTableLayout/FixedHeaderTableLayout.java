@@ -199,6 +199,9 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         ArrayList<Integer> overallRightSideMaxColumnWidth = new ArrayList<>();
         overallRightSideMaxColumnWidth = Utils.calculateMaxColumnWidth(overallRightSideMaxColumnWidth, mainTable);
         overallRightSideMaxColumnWidth = Utils.calculateMaxColumnWidth(overallRightSideMaxColumnWidth, columnHeaderTable);
+        // Ensure all data columns use a fixed width so the scrolling body renders consistently
+        int fixedDataColumnWidth = Utils.getMaxValue(overallRightSideMaxColumnWidth);
+        Utils.setAllValues(overallRightSideMaxColumnWidth, fixedDataColumnWidth);
         //Log.d(LOG_TAG, "overallRightSideMaxColumnWidth:" + overallRightSideMaxColumnWidth);
         // Set the new max column width in mainTable and columnHeaderTable
         Utils.setMaxColumnWidth(overallRightSideMaxColumnWidth, mainTable);

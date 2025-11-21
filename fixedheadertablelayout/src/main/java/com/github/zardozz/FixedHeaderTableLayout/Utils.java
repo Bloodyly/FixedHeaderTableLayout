@@ -72,18 +72,4 @@ public class Utils {
             tableRow.setColumnWidths(newWidths);
         }
     }
-
-    public static int getMaxValue(ArrayList<Integer> values) {
-        int maxValue = 0;
-        for (Integer value : values) {
-            maxValue = Math.max(maxValue, value);
-        }
-        return maxValue;
-    }
-
-    public static void setAllValues(ArrayList<Integer> values, int newValue) {
-        for (int i = 0; i < values.size(); i++) {
-            values.set(i, newValue);
-        }
-    }
 }

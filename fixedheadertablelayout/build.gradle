@@ -32,7 +32,7 @@ ext {
     PUBLISH_ARTIFACT_ID = 'fixedheadertablelayout'
 }
 
-apply from: "${rootProject.projectDir}/scripts/publish-mavencentral.gradle"
+ /* apply from: "${rootProject.projectDir}/scripts/publish-mavencentral.gradle" */
 
 File keystorePropertiesFile = project.rootProject.file('local.properties')
 if (keystorePropertiesFile.exists()) {

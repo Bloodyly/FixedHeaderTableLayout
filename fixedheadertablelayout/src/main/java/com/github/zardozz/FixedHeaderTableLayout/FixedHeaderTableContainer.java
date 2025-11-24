@@ -62,6 +62,9 @@ public class FixedHeaderTableContainer extends ViewGroup {
     private float minScale = 0.5f;
     private float maxScale = 2.0f;
 
+    private float contentWidth = 0f;
+    private float contentHeight = 0f;
+
     private float lastTouchX;
     private float lastTouchY;
     private boolean isScrolling = false;
@@ -71,6 +74,8 @@ public class FixedHeaderTableContainer extends ViewGroup {
     private int dividerColor = Color.TRANSPARENT;
     private @ColorInt int sheetBackgroundColor = Color.WHITE;
     private final Paint dividerPaint = new Paint();
+
+    private static final float OVERSCROLL_MARGIN = 0f;
 
     public FixedHeaderTableContainer(Context context) {
         this(context, null);
@@ -187,6 +192,8 @@ public class FixedHeaderTableContainer extends ViewGroup {
                 top += dividerHeightPx;
             }
         }
+        updateContentBounds();
+        clampPan();
         applyViewportToChildren();
     }
 
@@ -251,8 +258,48 @@ public class FixedHeaderTableContainer extends ViewGroup {
         globalPanX = panX;
         globalPanY = panY;
         globalScale = Math.max(minScale, Math.min(maxScale, scale));
+        clampPan();
         applyViewportToChildren();
         invalidate();
+    }
+
+    private void updateContentBounds() {
+        float maxWidth = 0f;
+        float totalHeight = 0f;
+
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            if (child.getVisibility() == GONE) continue;
+
+            maxWidth = Math.max(maxWidth, child.getMeasuredWidth());
+            totalHeight += child.getMeasuredHeight();
+            if (i < getChildCount() - 1) {
+                totalHeight += dividerHeightPx;
+            }
+        }
+
+        contentWidth = maxWidth;
+        contentHeight = totalHeight;
+    }
+
+    private void clampPan() {
+        float viewWidth = getWidth();
+        float viewHeight = getHeight();
+
+        float scaledWidth = contentWidth * globalScale;
+        float scaledHeight = contentHeight * globalScale;
+
+        float minPanX = Math.min(0f, viewWidth - scaledWidth) - OVERSCROLL_MARGIN;
+        float maxPanX = OVERSCROLL_MARGIN;
+
+        float minPanY = Math.min(0f, viewHeight - scaledHeight) - OVERSCROLL_MARGIN;
+        float maxPanY = OVERSCROLL_MARGIN;
+
+        if (globalPanX < minPanX) globalPanX = minPanX;
+        if (globalPanX > maxPanX) globalPanX = maxPanX;
+
+        if (globalPanY < minPanY) globalPanY = minPanY;
+        if (globalPanY > maxPanY) globalPanY = maxPanY;
     }
 
     private void applyViewport(FixedHeaderTableLayout table) {

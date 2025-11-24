@@ -82,42 +82,50 @@ dependencies {
 
 Please check out the [project's wiki](https://github.com/Zardozz/FixedHeaderTableLayout/wiki).
 
-## Quick example: multiple subtables with custom dividers and spans
+## Quick example: sheet-style stacking with sticky rows/columns
 
-The new `FixedHeaderTableContainer` lets you place several `FixedHeaderTableLayout` instances
-next to each other while keeping fixed rows/columns and column widths independent per subtable.
+Use `FixedHeaderTableContainer` to vertically stack independent `FixedHeaderTableLayout` instances
+while sharing a single pan/zoom/inertia controller. Each subtable can declare its own sticky rows
+and columns.
 
-```kotlin
-// In an Activity/Fragment
-val container = FixedHeaderTableContainer(this).apply {
-    setDividerWidthPx(12)
-    setDividerHeightPx(LayoutParams.MATCH_PARENT)
-    setDividerColor(Color.LTGRAY)
-}
+```xml
+<!-- layout/activity_sheet.xml -->
+<com.github.zardozz.FixedHeaderTableLayout.FixedHeaderTableContainer
+    android:id="@+id/tableContainer"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFFFFF"/>
+```
 
-// First subtable with its own fixed header definition
-val leftTable = FixedHeaderTableLayout(this).apply {
-    setFixedHeaderCounts(fixedHeaderRowCount = 1, fixedHeaderColumnCount = 1)
-    setColumnWidthOverrides(SparseIntArray().apply { put(0, 180) })
-    // addViews(...) with your FixedHeaderSubTableLayout instances
-}
+```java
+FixedHeaderTableContainer container = findViewById(R.id.tableContainer);
+container.setSheetBackgroundColor(Color.WHITE);
 
-// Second subtable can use different fixed headers and widths
-val rightTable = FixedHeaderTableLayout(this).apply {
-    setFixedHeaderCounts(fixedHeaderRowCount = 2, fixedHeaderColumnCount = 0)
-    setColumnWidthOverrides(SparseIntArray().apply {
-        put(1, 220) // wider description column
-    })
-    // addViews(...) with your FixedHeaderSubTableLayout instances
-}
+FixedHeaderTableLayout revenueTable = buildRevenueTable();
+revenueTable.setStickyRowIndices(0, 3, 11);   // progressively sticky header rows
+revenueTable.setStickyColumnIndices(0);       // keep first column frozen
 
-// Merge cells inside a row if needed
-val headerRow = FixedHeaderTableRow(this).apply {
-    mergeCells(startColumn = 0, span = 2) // spans first two columns
-}
+FixedHeaderTableLayout expenseTable = buildExpenseTable();
+expenseTable.setStickyRowIndices(0, 5);
+expenseTable.setStickyColumnIndices(0, 1);
 
-container.addSubTable(leftTable)
-container.addSubTable(rightTable)
+container.addSubTable(revenueTable);
+container.addSubTable(expenseTable);
+```
+
+Each `build*Table()` call constructs a `FixedHeaderTableLayout`, provides its
+`addViews(...)` configuration, and optionally uses per-column width overrides. The container
+handles all gestures (pan, diagonal scroll, pinch-to-zoom, and inertia) and forwards a single
+viewport to every child table so the sheet behaves like one continuous surface. Any unused space is
+painted with the container's `sheetBackgroundColor` to reinforce the single-sheet illusion.
+
+### Assumptions, ideas and potential improvements
+- Cloning sticky header rows/columns copies basic `TextView` appearance; highly custom cells may
+  need bespoke cloning logic.
+- Viewport bounds are not yet constrained to content size; clamping based on measured subtable
+  dimensions would prevent over-panning.
+- Divider spacing is painted by the container; expose a dedicated divider drawable if stronger
+  visual separation is needed.
 parentLayout.addView(container)
 ```
 

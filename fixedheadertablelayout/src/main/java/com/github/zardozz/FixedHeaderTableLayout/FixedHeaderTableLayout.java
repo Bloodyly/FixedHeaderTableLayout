@@ -190,6 +190,20 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
     }
 
     /**
+     * @return the unscaled width of the table content.
+     */
+    public int getContentWidth() {
+        return rightBound;
+    }
+
+    /**
+     * @return the unscaled height of the table content.
+     */
+    public int getContentHeight() {
+        return bottomBound;
+    }
+
+    /**
      * Enable external viewport control so that this table no longer consumes gestures and instead
      * renders based on coordinates provided via {@link #setExternalViewport(float, float, float)}.
      */

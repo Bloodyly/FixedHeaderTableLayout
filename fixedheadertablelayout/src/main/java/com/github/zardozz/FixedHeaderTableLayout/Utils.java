@@ -25,6 +25,8 @@
 package com.github.zardozz.FixedHeaderTableLayout;
 
 import java.util.ArrayList;
+import java.util.List;
+import android.util.SparseIntArray;
 
 public class Utils {
 
@@ -70,6 +72,30 @@ public class Utils {
         for (int row = 0; row < table.getChildCount(); row++) {
             FixedHeaderTableRow tableRow = (FixedHeaderTableRow) table.getChildAt(row);
             tableRow.setColumnWidths(newWidths);
+        }
+    }
+
+    public static void applyColumnOverrides(SparseIntArray overrides, FixedHeaderSubTableLayout table) {
+        if (overrides == null || overrides.size() == 0 || table == null) {
+            return;
+        }
+        for (int row = 0; row < table.getChildCount(); row++) {
+            FixedHeaderTableRow tableRow = (FixedHeaderTableRow) table.getChildAt(row);
+            int columnCount = tableRow.getChildCount();
+            List<Integer> explicitWidths = new ArrayList<>(columnCount);
+            for (int column = 0; column < columnCount; column++) {
+                int override = overrides.get(column, -1);
+                if (override > 0) {
+                    explicitWidths.add(override);
+                } else if (tableRow.getExplicitColumnWidths().size() > column && tableRow.getExplicitColumnWidths().get(column) > 0) {
+                    explicitWidths.add(tableRow.getExplicitColumnWidths().get(column));
+                } else if (tableRow.getColumnWidths().size() > column) {
+                    explicitWidths.add(tableRow.getColumnWidths().get(column));
+                } else {
+                    explicitWidths.add(0);
+                }
+            }
+            tableRow.setExplicitColumnWidths(new ArrayList<>(explicitWidths));
         }
     }
 }

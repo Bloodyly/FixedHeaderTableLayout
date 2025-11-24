@@ -39,6 +39,8 @@ import java.util.ArrayList;
 public class FixedHeaderTableRow extends LinearLayout {
 
     private ArrayList<Integer> mColumnWidths = new ArrayList<>();
+    private ArrayList<Integer> mExplicitColumnWidths = new ArrayList<>();
+    private ArrayList<CellSpan> mColumnSpans = new ArrayList<>();
     private int myWidth = 0;
     private int myHeight = 0;
     private int maxChildHeight = 0;
@@ -85,6 +87,36 @@ public class FixedHeaderTableRow extends LinearLayout {
     }
 
     @SuppressWarnings({"UnusedDeclaration"})
+    public void setExplicitColumnWidths(@Nullable ArrayList<Integer> explicitColumnWidths) {
+        if (explicitColumnWidths == null) {
+            this.mExplicitColumnWidths.clear();
+        } else {
+            this.mExplicitColumnWidths = explicitColumnWidths;
+        }
+        requestLayout();
+    }
+
+    @SuppressWarnings({"UnusedDeclaration"})
+    public ArrayList<Integer> getExplicitColumnWidths() {
+        return mExplicitColumnWidths;
+    }
+
+    @SuppressWarnings({"UnusedDeclaration"})
+    public void clearMergedCells() {
+        mColumnSpans.clear();
+        requestLayout();
+    }
+
+    @SuppressWarnings({"UnusedDeclaration"})
+    public void mergeCells(int startColumn, int span) {
+        if (span < 1) {
+            throw new IllegalArgumentException("Span must be 1 or greater");
+        }
+        mColumnSpans.add(new CellSpan(startColumn, span));
+        requestLayout();
+    }
+
+    @SuppressWarnings({"UnusedDeclaration"})
     public int getMaxChildHeight() {
         return maxChildHeight;
     }
@@ -105,31 +137,78 @@ public class FixedHeaderTableRow extends LinearLayout {
         throw new UnsupportedOperationException("Setting the Orientation is not supported");
     }
 
+    /**
+     * Measure the row
+     * A row is either measured to full size of all it's children (UNSPECIFIED)
+     * or measured to the size of having fixed size children to match other rows (EXACTLY)
+     * @param widthMeasureSpec Ignored
+     * @param heightMeasureSpec Ignored
+     */
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        if (preMeasured) {
+            //Log.d(LOG_TAG, "fixedMeasure: " + Integer.toHexString(System.identityHashCode(this)) );
+            fixedMeasure();
+        } else {
+            // For first Measure
+            //Log.d(LOG_TAG, "preMeasure: " + Integer.toHexString(System.identityHashCode(this)));
+            preMeasure();
+        }
+
+    }
+
+    private int resolveColumnWidth(int columnIndex, View columnChild) {
+        if (mExplicitColumnWidths.size() > columnIndex && mExplicitColumnWidths.get(columnIndex) > 0) {
+            return mExplicitColumnWidths.get(columnIndex);
+        }
+        return columnChild.getMeasuredWidth();
+    }
+
+    private int findSpanForColumn(int columnIndex) {
+        for (CellSpan span : mColumnSpans) {
+            if (span.startColumn == columnIndex) {
+                return span.spanLength;
+            }
+        }
+        return 1;
+    }
+
     private void preMeasure(){
         // Reset stored size as we are measuring again
         myWidth = 0;
         myHeight = 0;
         // Measure UNSPECIFIED
         int measureSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+        mColumnWidths.clear();
+        maxChildHeight = 0;
 
         final int count = getChildCount();
-        for (int i = 0; i < count; ++i) {
-            final View child = getChildAt(i);
-            if (child == null) {
-                continue;
-            }
-            if (child.getVisibility() == View.GONE) {
+        int columnIndex = 0;
+        while (columnIndex < count) {
+            final View child = getChildAt(columnIndex);
+            if (child == null || child.getVisibility() == View.GONE) {
+                columnIndex++;
                 continue;
             }
 
-            measureChildWithMargins(child, measureSpec, 0, measureSpec, 0);
-            int childWidth = child.getMeasuredWidth();
-            int childHeight = child.getMeasuredHeight();
-            //Log.d(LOG_TAG, "preMeasure:mColumnWidths: C" + i + " width = " + childWidth);
-            mColumnWidths.add(childWidth);
-            myWidth += childWidth;
-            maxChildHeight = Math.max(maxChildHeight, childHeight);
+            int span = findSpanForColumn(columnIndex);
+            int spanWidth = 0;
 
+            for (int offset = 0; offset < span && (columnIndex + offset) < count; offset++) {
+                final View spanChild = getChildAt(columnIndex + offset);
+                if (spanChild == null || spanChild.getVisibility() == View.GONE) {
+                    continue;
+                }
+                measureChildWithMargins(spanChild, measureSpec, 0, measureSpec, 0);
+                int childWidth = resolveColumnWidth(columnIndex + offset, spanChild);
+                mColumnWidths.add(childWidth);
+                spanWidth += childWidth;
+                maxChildHeight = Math.max(maxChildHeight, spanChild.getMeasuredHeight());
+            }
+
+            myWidth += spanWidth;
+            columnIndex += span;
         }
 
         // Add my padding
@@ -155,25 +234,27 @@ public class FixedHeaderTableRow extends LinearLayout {
         int heightMeasureSpec = MeasureSpec.makeMeasureSpec(maxChildHeight, MeasureSpec.EXACTLY);
 
         final int count = getChildCount();
-        for (int i = 0; i < count; ++i) {
-            //Log.d(LOG_TAG, "fixed:mColumnWidths: C" + i + " width = " + mColumnWidths.get(i));
-            int widthMeasureSpec = MeasureSpec.makeMeasureSpec(mColumnWidths.get(i), MeasureSpec.EXACTLY);
-            View child = getChildAt(i);
-            if (child == null) {
-                continue;
-            }
-            if (child.getVisibility() == View.GONE) {
-                continue;
+        int columnIndex = 0;
+        while (columnIndex < count) {
+            int span = findSpanForColumn(columnIndex);
+            int spanWidth = 0;
+            for (int offset = 0; offset < span && (columnIndex + offset) < mColumnWidths.size(); offset++) {
+                spanWidth += mColumnWidths.get(columnIndex + offset);
             }
 
-            // Ask the child to match the parent so it fills out the whole cell
-            LinearLayout.LayoutParams childLayoutParams = new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
-            child.setLayoutParams(childLayoutParams);
+            int widthMeasureSpec = MeasureSpec.makeMeasureSpec(spanWidth, MeasureSpec.EXACTLY);
+            View child = getChildAt(columnIndex);
+            if (child != null && child.getVisibility() != View.GONE) {
+                // Ask the child to match the parent so it fills out the whole cell
+                LinearLayout.LayoutParams childLayoutParams = new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
+                child.setLayoutParams(childLayoutParams);
 
-            measureChildWithMargins(child, widthMeasureSpec, 0, heightMeasureSpec, 0);
+                measureChildWithMargins(child, widthMeasureSpec, 0, heightMeasureSpec, 0);
+            }
 
             // Calculate new row width using the width we have set each column to
-            myWidth += mColumnWidths.get(i);
+            myWidth += spanWidth;
+            columnIndex += span;
         }
 
         // Add my padding
@@ -188,24 +269,13 @@ public class FixedHeaderTableRow extends LinearLayout {
         //Log.d(LOG_TAG, "fixedMeasure:setMeasuredDimension:" + myWidth + "x" + myHeight);
     }
 
-    /**
-     * Measure the row
-     * A row is either measured to full size of all it's children (UNSPECIFIED)
-     * or measured to the size of having fixed size children to match other rows (EXACTLY)
-     * @param widthMeasureSpec Ignored
-     * @param heightMeasureSpec Ignored
-     */
-    @Override
-    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-        if (preMeasured) {
-            //Log.d(LOG_TAG, "fixedMeasure: " + Integer.toHexString(System.identityHashCode(this)) );
-            fixedMeasure();
-        } else {
-            // For first Measure
-            //Log.d(LOG_TAG, "preMeasure: " + Integer.toHexString(System.identityHashCode(this)));
-            preMeasure();
-        }
+    private static class CellSpan {
+        private final int startColumn;
+        private final int spanLength;
 
+        private CellSpan(int startColumn, int spanLength) {
+            this.startColumn = startColumn;
+            this.spanLength = spanLength;
+        }
     }
 }

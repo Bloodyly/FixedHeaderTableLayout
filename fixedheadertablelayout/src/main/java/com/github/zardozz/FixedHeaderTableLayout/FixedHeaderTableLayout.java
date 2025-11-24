@@ -38,6 +38,7 @@ import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.OverScroller;
+import android.util.SparseIntArray;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -82,6 +83,10 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
     private int bottomBound;
     private float scaledRightBound;
     private float scaledBottomBound;
+
+    private int fixedHeaderRowCount = 1;
+    private int fixedHeaderColumnCount = 1;
+    private SparseIntArray columnWidthOverrides = new SparseIntArray();
 
     private static final String LOG_TAG = FixedHeaderTableLayout.class.getSimpleName();
 
@@ -157,6 +162,31 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         return maxScale;
     }
 
+    @SuppressWarnings({"UnusedDeclaration"})
+    public void setFixedHeaderCounts(int fixedHeaderRowCount, int fixedHeaderColumnCount) {
+        this.fixedHeaderRowCount = Math.max(0, fixedHeaderRowCount);
+        this.fixedHeaderColumnCount = Math.max(0, fixedHeaderColumnCount);
+    }
+
+    @SuppressWarnings({"UnusedDeclaration"})
+    public int getFixedHeaderRowCount() {
+        return fixedHeaderRowCount;
+    }
+
+    @SuppressWarnings({"UnusedDeclaration"})
+    public int getFixedHeaderColumnCount() {
+        return fixedHeaderColumnCount;
+    }
+
+    @SuppressWarnings({"UnusedDeclaration"})
+    public void setColumnWidthOverrides(SparseIntArray columnWidthOverrides) {
+        if (columnWidthOverrides == null) {
+            this.columnWidthOverrides = new SparseIntArray();
+        } else {
+            this.columnWidthOverrides = columnWidthOverrides;
+        }
+    }
+
     /**
      * Add the four tables that make up the Layout
      *
@@ -188,6 +218,12 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         if (cornerTable.getId() == NO_ID) {
             cornerTable.setId(R.id.CornerTable);
         }
+
+        // Apply any column width overrides before initial measurement so sizing is honoured per subtable
+        Utils.applyColumnOverrides(columnWidthOverrides, mainTable);
+        Utils.applyColumnOverrides(columnWidthOverrides, columnHeaderTable);
+        Utils.applyColumnOverrides(columnWidthOverrides, rowHeaderTable);
+        Utils.applyColumnOverrides(columnWidthOverrides, cornerTable);
 
         // Need to measure all Tables to full (UNSPECIFIED) size
         int measureSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);

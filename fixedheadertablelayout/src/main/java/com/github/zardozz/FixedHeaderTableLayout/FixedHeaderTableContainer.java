@@ -105,6 +105,9 @@ public class FixedHeaderTableContainer extends ViewGroup {
         applyViewport(tableLayout);
         subtables.add(tableLayout);
         addView(tableLayout, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+        updateContentBounds();
+        clampPan();
+        applyViewportToChildren();
         requestLayout();
     }
 
@@ -269,10 +272,14 @@ public class FixedHeaderTableContainer extends ViewGroup {
 
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);
-            if (child.getVisibility() == GONE) continue;
+            if (!(child instanceof FixedHeaderTableLayout) || child.getVisibility() == GONE) {
+                continue;
+            }
 
-            maxWidth = Math.max(maxWidth, child.getMeasuredWidth());
-            totalHeight += child.getMeasuredHeight();
+            FixedHeaderTableLayout table = (FixedHeaderTableLayout) child;
+            maxWidth = Math.max(maxWidth, table.getContentWidth());
+            totalHeight += table.getContentHeight();
+
             if (i < getChildCount() - 1) {
                 totalHeight += dividerHeightPx;
             }

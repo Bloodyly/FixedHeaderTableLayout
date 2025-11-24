@@ -30,6 +30,7 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -44,6 +45,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 
 public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureDetector.OnScaleGestureListener{
 
@@ -52,6 +54,12 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
     private float scaleFactor = 1;
     private float minScale = 0.5f;
     private float maxScale = 2.0f;
+
+    private boolean useExternalViewport = false;
+    private float externalPanX = 0f;
+    private float externalPanY = 0f;
+    private float externalScaleFactor = 1f;
+    private boolean matricesDirty = true;
 
     private float mLastTouchX;
     private float mLastTouchY;
@@ -83,6 +91,13 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
     private int bottomBound;
     private float scaledRightBound;
     private float scaledBottomBound;
+
+    private int[] stickyRowIndices = new int[] {0};
+    private int[] stickyColumnIndices = new int[] {0};
+    private int activeStickyRow = 0;
+    private int activeStickyColumn = 0;
+    private final ArrayList<Integer> rowTopPositions = new ArrayList<>();
+    private final ArrayList<Integer> columnLeftPositions = new ArrayList<>();
 
     private int fixedHeaderRowCount = 1;
     private int fixedHeaderColumnCount = 1;
@@ -142,6 +157,18 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         gestureDetector = new GestureDetector(context, new GestureListener());
     }
 
+    private float getEffectiveScale() {
+        return useExternalViewport ? externalScaleFactor : scaleFactor;
+    }
+
+    private float getEffectivePanX() {
+        return useExternalViewport ? externalPanX : panX;
+    }
+
+    private float getEffectivePanY() {
+        return useExternalViewport ? externalPanY : panY;
+    }
+
     @SuppressWarnings({"UnusedDeclaration"})
     public void setMinScale(float minScale){
         this.minScale = minScale;
@@ -160,6 +187,34 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
     @SuppressWarnings({"UnusedDeclaration"})
     public float getMaxScale() {
         return maxScale;
+    }
+
+    /**
+     * Enable external viewport control so that this table no longer consumes gestures and instead
+     * renders based on coordinates provided via {@link #setExternalViewport(float, float, float)}.
+     */
+    public void setUseExternalViewport(boolean enabled) {
+        this.useExternalViewport = enabled;
+        markMatricesDirty();
+        invalidate();
+    }
+
+    /**
+     * Update the externally managed viewport state. Pan and zoom are applied during draw time using
+     * the effective values resolved from this method or the internal gesture handling depending on
+     * {@link #useExternalViewport}.
+     */
+    public void setExternalViewport(float panX, float panY, float scaleFactor) {
+        this.externalPanX = panX;
+        this.externalPanY = panY;
+        this.externalScaleFactor = scaleFactor;
+        markMatricesDirty();
+        updateStickyHeaders();
+        invalidate();
+    }
+
+    private void markMatricesDirty() {
+        matricesDirty = true;
     }
 
     @SuppressWarnings({"UnusedDeclaration"})
@@ -185,6 +240,34 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         } else {
             this.columnWidthOverrides = columnWidthOverrides;
         }
+    }
+
+    /**
+     * Configure the row indices that should become sticky. The highest index that has scrolled past
+     * the top of the viewport will be used as the active sticky row.
+     */
+    public void setStickyRowIndices(int... indices) {
+        if (indices == null || indices.length == 0) {
+            stickyRowIndices = new int[] {0};
+        } else {
+            Arrays.sort(indices);
+            stickyRowIndices = indices;
+        }
+        updateStickyHeaders();
+    }
+
+    /**
+     * Configure the column indices that should become sticky. The highest index that has scrolled
+     * past the left of the viewport will be used as the active sticky column.
+     */
+    public void setStickyColumnIndices(int... indices) {
+        if (indices == null || indices.length == 0) {
+            stickyColumnIndices = new int[] {0};
+        } else {
+            Arrays.sort(indices);
+            stickyColumnIndices = indices;
+        }
+        updateStickyHeaders();
     }
 
     /**
@@ -317,6 +400,10 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         scaledRightBound = rightBound * scaleFactor;
         scaledBottomBound = bottomBound * scaleFactor;
         //Log.d(LOG_TAG, "Scaled Bounds: = " + scaledRightBound + " , " + scaledBottomBound);
+
+        buildRowTopPositions();
+        buildColumnLeftPositions();
+        updateStickyHeaders();
     }
 
 
@@ -396,7 +483,8 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         columnHeaderMatrix.postTranslate(panX, 0);
         rowHeaderMatrix.postTranslate(0, panY);
 
-
+        markMatricesDirty();
+        updateStickyHeaders();
         invalidate();
     }
 
@@ -416,6 +504,7 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         boolean result;
         int save = canvas.save();
         //Log.d(LOG_TAG, "drawChild:" + Integer.toHexString(System.identityHashCode(child)));
+        prepareMatricesForDrawing();
         if (child == mainTable) {
             //Log.d(LOG_TAG, "drawChild:mainTable");
             canvas.concat(mainMatrix);
@@ -435,8 +524,36 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         return result;
     }
 
+    private void prepareMatricesForDrawing() {
+        if (!matricesDirty) {
+            return;
+        }
+        float effectiveScale = getEffectiveScale();
+        float effectivePanX = getEffectivePanX();
+        float effectivePanY = getEffectivePanY();
+
+        mainMatrix.reset();
+        columnHeaderMatrix.reset();
+        rowHeaderMatrix.reset();
+        cornerMatrix.reset();
+
+        mainMatrix.setScale(effectiveScale, effectiveScale);
+        columnHeaderMatrix.setScale(effectiveScale, effectiveScale);
+        rowHeaderMatrix.setScale(effectiveScale, effectiveScale);
+        cornerMatrix.setScale(effectiveScale, effectiveScale);
+
+        mainMatrix.postTranslate(effectivePanX, effectivePanY);
+        columnHeaderMatrix.postTranslate(effectivePanX, 0);
+        rowHeaderMatrix.postTranslate(0, effectivePanY);
+
+        matricesDirty = false;
+    }
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (useExternalViewport) {
+            return super.dispatchTouchEvent(ev);
+        }
         /* Work out if this ViewGroup needs the event to scroll/scale
          *  This has to be done here instead of onInterceptTouchEvent
          * as all other events need to be mapped and must not be disabled by any child
@@ -606,6 +723,7 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
         }
 
         MotionEvent transformEvent = MotionEvent.obtain(ev);
+        prepareMatricesForDrawing();
         transformEvent.transform(mappingMatrix);
 
         //Log.d(LOG_TAG, "mappedEvent = " + transformEvent.getX() + ":" + transformEvent.getY());
@@ -641,28 +759,205 @@ public class FixedHeaderTableLayout extends FrameLayout implements ScaleGestureD
     // Length of scrollbar track
     @Override
     protected int computeHorizontalScrollRange() {
-        return (int) scaledRightBound;
+        return (int) (rightBound * getEffectiveScale());
     }
 
     // Position from thumb from the left of view
     @Override
     protected int computeHorizontalScrollOffset() {
-        return (int) -panX;
+        return (int) -getEffectivePanX();
     }
 
     @Override
     protected int computeVerticalScrollRange() {
-        return (int) scaledBottomBound;
+        return (int) (bottomBound * getEffectiveScale());
     }
 
     @Override
     protected int computeVerticalScrollOffset() {
-        return (int) -panY;
+        return (int) -getEffectivePanY();
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        buildRowTopPositions();
+        buildColumnLeftPositions();
+        updateStickyHeaders();
+    }
+
+    private void buildRowTopPositions() {
+        rowTopPositions.clear();
+        if (mainTable == null) {
+            return;
+        }
+        int top = 0;
+        for (int i = 0; i < mainTable.getChildCount(); i++) {
+            View row = mainTable.getChildAt(i);
+            rowTopPositions.add(top);
+            top += row.getMeasuredHeight();
+        }
+    }
+
+    private void buildColumnLeftPositions() {
+        columnLeftPositions.clear();
+        if (mainTable == null || mainTable.getChildCount() == 0) {
+            return;
+        }
+        View firstRow = mainTable.getChildAt(0);
+        if (!(firstRow instanceof FixedHeaderTableRow)) {
+            return;
+        }
+        FixedHeaderTableRow row = (FixedHeaderTableRow) firstRow;
+        int left = 0;
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View cell = row.getChildAt(i);
+            columnLeftPositions.add(left);
+            left += cell.getMeasuredWidth();
+        }
+    }
+
+    private int getFirstVisibleRowIndex(float effectivePanY, float effectiveScale) {
+        if (rowTopPositions.isEmpty()) return 0;
+        float contentOffsetY = -effectivePanY / effectiveScale;
+        int index = 0;
+        for (int i = 0; i < rowTopPositions.size(); i++) {
+            int top = rowTopPositions.get(i);
+            if (top <= contentOffsetY) {
+                index = i;
+            } else {
+                break;
+            }
+        }
+        return index;
+    }
+
+    private int getFirstVisibleColumnIndex(float effectivePanX, float effectiveScale) {
+        if (columnLeftPositions.isEmpty()) return 0;
+        float contentOffsetX = -effectivePanX / effectiveScale;
+        int index = 0;
+        for (int i = 0; i < columnLeftPositions.size(); i++) {
+            int left = columnLeftPositions.get(i);
+            if (left <= contentOffsetX) {
+                index = i;
+            } else {
+                break;
+            }
+        }
+        return index;
+    }
+
+    private void updateStickyHeaders() {
+        if (stickyRowIndices.length > 0) {
+            updateActiveStickyRow(getEffectivePanY(), getEffectiveScale());
+        }
+        if (stickyColumnIndices.length > 0) {
+            updateActiveStickyColumn(getEffectivePanX(), getEffectiveScale());
+        }
+    }
+
+    private void updateActiveStickyRow(float effectivePanY, float effectiveScale) {
+        int firstVisible = getFirstVisibleRowIndex(effectivePanY, effectiveScale);
+        int candidate = stickyRowIndices[0];
+        for (int idx : stickyRowIndices) {
+            if (idx <= firstVisible) {
+                candidate = idx;
+            } else {
+                break;
+            }
+        }
+        if (candidate != activeStickyRow) {
+            activeStickyRow = candidate;
+            rebuildRowHeaderForActiveStickyRow();
+        }
+    }
+
+    private void updateActiveStickyColumn(float effectivePanX, float effectiveScale) {
+        int firstVisible = getFirstVisibleColumnIndex(effectivePanX, effectiveScale);
+        int candidate = stickyColumnIndices[0];
+        for (int idx : stickyColumnIndices) {
+            if (idx <= firstVisible) {
+                candidate = idx;
+            } else {
+                break;
+            }
+        }
+        if (candidate != activeStickyColumn) {
+            activeStickyColumn = candidate;
+            rebuildColumnHeaderForActiveStickyColumn();
+        }
+    }
+
+    private void rebuildRowHeaderForActiveStickyRow() {
+        if (rowHeaderTable == null || mainTable == null) {
+            return;
+        }
+        if (activeStickyRow >= mainTable.getChildCount()) {
+            return;
+        }
+        rowHeaderTable.removeAllViews();
+        View sourceRow = mainTable.getChildAt(activeStickyRow);
+        if (sourceRow instanceof FixedHeaderTableRow) {
+            rowHeaderTable.addView(cloneRow((FixedHeaderTableRow) sourceRow));
+        }
+    }
+
+    private void rebuildColumnHeaderForActiveStickyColumn() {
+        if (columnHeaderTable == null || mainTable == null) {
+            return;
+        }
+        if (mainTable.getChildCount() == 0) {
+            return;
+        }
+        columnHeaderTable.removeAllViews();
+        FixedHeaderTableRow headerRow = new FixedHeaderTableRow(getContext());
+        FixedHeaderTableRow sourceRow = (FixedHeaderTableRow) mainTable.getChildAt(0);
+        int columnCount = sourceRow.getChildCount();
+        for (int i = activeStickyColumn; i < columnCount; i++) {
+            headerRow.addView(cloneCell(sourceRow.getChildAt(i)));
+        }
+        columnHeaderTable.addView(headerRow);
+    }
+
+    private FixedHeaderTableRow cloneRow(FixedHeaderTableRow source) {
+        FixedHeaderTableRow clone = new FixedHeaderTableRow(getContext());
+        clone.setExplicitColumnWidths(new ArrayList<>(source.getExplicitColumnWidths()));
+        for (int i = 0; i < source.getChildCount(); i++) {
+            clone.addView(cloneCell(source.getChildAt(i)));
+        }
+        return clone;
+    }
+
+    private View cloneCell(View original) {
+        View copy;
+        if (original instanceof android.widget.TextView) {
+            android.widget.TextView text = (android.widget.TextView) original;
+            android.widget.TextView clone = new android.widget.TextView(getContext());
+            clone.setText(text.getText());
+            clone.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, text.getTextSize());
+            clone.setTextColor(text.getCurrentTextColor());
+            clone.setPadding(text.getPaddingLeft(), text.getPaddingTop(), text.getPaddingRight(), text.getPaddingBottom());
+            clone.setGravity(text.getGravity());
+            clone.setTypeface(text.getTypeface());
+            clone.setBackground(text.getBackground());
+            copy = clone;
+        } else {
+            copy = new View(getContext());
+            copy.setBackground(original.getBackground());
+        }
+        ViewGroup.LayoutParams params = original.getLayoutParams();
+        if (params != null) {
+            copy.setLayoutParams(new ViewGroup.LayoutParams(params.width, params.height));
+        }
+        return copy;
     }
 
     @Override
     public void computeScroll() {
         super.computeScroll();
+        if (useExternalViewport) {
+            return;
+        }
         if (scroller.computeScrollOffset()) {
             float dx = panX - scroller.getCurrX();
             float dy = panY - scroller.getCurrY();

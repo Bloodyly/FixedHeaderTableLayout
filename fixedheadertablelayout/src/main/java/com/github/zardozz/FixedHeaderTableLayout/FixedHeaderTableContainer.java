@@ -25,112 +25,282 @@
 package com.github.zardozz.FixedHeaderTableLayout;
 
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.util.AttributeSet;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
-import android.widget.HorizontalScrollView;
-import android.widget.LinearLayout;
+import android.view.ViewConfiguration;
+import android.view.ViewGroup;
+import android.widget.OverScroller;
 
 import androidx.annotation.ColorInt;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * FixedHeaderTableContainer hosts multiple {@link FixedHeaderTableLayout} instances next to each
- * other, allowing independent fixed header definitions per table while keeping a consistent gap
- * (divider) between them.
+ * FixedHeaderTableContainer stacks {@link FixedHeaderTableLayout} children vertically and manages a
+ * single shared viewport (pan/zoom) for all subtables. The container owns the gesture detectors and
+ * inertial scrolling to provide a sheet-like experience.
  */
-public class FixedHeaderTableContainer extends HorizontalScrollView {
+public class FixedHeaderTableContainer extends ViewGroup {
 
-    private final LinearLayout container;
-    private int dividerHeightPx = LayoutParams.MATCH_PARENT;
-    private int dividerWidthPx = 8;
-    private @ColorInt int dividerColor = Color.TRANSPARENT;
     private final List<FixedHeaderTableLayout> subtables = new ArrayList<>();
+    private final GestureDetector gestureDetector;
+    private final ScaleGestureDetector scaleGestureDetector;
+    private final OverScroller scroller;
+
+    private float globalPanX = 0f;
+    private float globalPanY = 0f;
+    private float globalScale = 1f;
+    private float minScale = 0.5f;
+    private float maxScale = 2.0f;
+
+    private float lastTouchX;
+    private float lastTouchY;
+    private boolean isScrolling = false;
+    private final int touchSlop;
+
+    private int dividerHeightPx = 8;
+    private int dividerColor = Color.TRANSPARENT;
+    private @ColorInt int sheetBackgroundColor = Color.WHITE;
+    private final Paint dividerPaint = new Paint();
 
     public FixedHeaderTableContainer(Context context) {
-        super(context);
-        container = buildContainer(context);
+        this(context, null);
     }
 
     public FixedHeaderTableContainer(Context context, @Nullable AttributeSet attrs) {
-        super(context, attrs);
-        container = buildContainer(context);
+        this(context, attrs, 0);
     }
 
     public FixedHeaderTableContainer(Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
-        container = buildContainer(context);
-    }
-
-    private LinearLayout buildContainer(Context context) {
-        LinearLayout inner = new LinearLayout(context);
-        inner.setOrientation(LinearLayout.HORIZONTAL);
-        addView(inner, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
-        return inner;
+        setWillNotDraw(false);
+        touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+        scroller = new OverScroller(context);
+        gestureDetector = new GestureDetector(context, new GestureListener());
+        scaleGestureDetector = new ScaleGestureDetector(context, new ScaleListener());
+        dividerPaint.setStyle(Paint.Style.FILL);
+        dividerPaint.setColor(dividerColor);
     }
 
     /**
-     * Adds a {@link FixedHeaderTableLayout} to the container. A divider view is inserted before the
-     * table after the first entry to maintain the requested separation.
-     *
-     * @param tableLayout the table layout to add
+     * Add a {@link FixedHeaderTableLayout} to the sheet. The table is configured to use external
+     * viewport mode and will be updated whenever the container viewport changes.
      */
-    @SuppressWarnings({"UnusedDeclaration"})
-    public void addSubTable(FixedHeaderTableLayout tableLayout) {
-        if (tableLayout == null) {
-            return;
-        }
-        if (!subtables.isEmpty()) {
-            container.addView(buildDivider());
-        }
+    public void addSubTable(@NonNull FixedHeaderTableLayout tableLayout) {
+        tableLayout.setUseExternalViewport(true);
+        applyViewport(tableLayout);
         subtables.add(tableLayout);
-        container.addView(tableLayout, new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+        addView(tableLayout, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+        requestLayout();
     }
 
     /**
-     * Returns the currently added subtables.
+     * Sets the sheet background color used to fill empty areas around the stacked tables.
      */
-    @SuppressWarnings({"UnusedDeclaration"})
-    public List<FixedHeaderTableLayout> getSubtables() {
-        return subtables;
+    public void setSheetBackgroundColor(@ColorInt int color) {
+        this.sheetBackgroundColor = color;
+        invalidate();
     }
 
     /**
-     * Sets the divider height in pixels. By default it matches the height of the table.
+     * Sets the minimum scale factor allowed during pinch gestures.
      */
-    @SuppressWarnings({"UnusedDeclaration"})
+    public void setMinScale(float minScale) {
+        this.minScale = minScale;
+    }
+
+    /**
+     * Sets the maximum scale factor allowed during pinch gestures.
+     */
+    public void setMaxScale(float maxScale) {
+        this.maxScale = maxScale;
+    }
+
+    /**
+     * Configure the height of the divider placed between stacked tables.
+     */
     public void setDividerHeightPx(int dividerHeightPx) {
         this.dividerHeightPx = dividerHeightPx;
         requestLayout();
     }
 
-    /**
-     * Sets the divider width in pixels. This controls the space between subtables.
-     */
-    @SuppressWarnings({"UnusedDeclaration"})
-    public void setDividerWidthPx(int dividerWidthPx) {
-        this.dividerWidthPx = dividerWidthPx;
-        requestLayout();
-    }
-
-    /**
-     * Sets the divider color. Use {@link Color#TRANSPARENT} to make the separation invisible while
-     * maintaining spacing.
-     */
-    @SuppressWarnings({"UnusedDeclaration"})
     public void setDividerColor(@ColorInt int dividerColor) {
         this.dividerColor = dividerColor;
+        dividerPaint.setColor(dividerColor);
         invalidate();
     }
 
-    private View buildDivider() {
-        View divider = new View(getContext());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dividerWidthPx, dividerHeightPx);
-        divider.setLayoutParams(params);
-        divider.setBackgroundColor(dividerColor);
-        return divider;
+    @Override
+    protected void onDraw(Canvas canvas) {
+        canvas.drawColor(sheetBackgroundColor);
+        int top = getPaddingTop();
+        for (int i = 0; i < getChildCount() - 1; i++) {
+            View child = getChildAt(i);
+            if (child.getVisibility() == GONE) continue;
+            top += child.getMeasuredHeight();
+            if (dividerHeightPx > 0) {
+                canvas.drawRect(getPaddingLeft(), top, getWidth() - getPaddingRight(), top + dividerHeightPx, dividerPaint);
+                top += dividerHeightPx;
+            }
+        }
+        super.onDraw(canvas);
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        int width = 0;
+        int height = getPaddingTop() + getPaddingBottom();
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            if (child.getVisibility() == GONE) continue;
+            measureChild(child, widthMeasureSpec, heightMeasureSpec);
+            width = Math.max(width, child.getMeasuredWidth());
+            height += child.getMeasuredHeight();
+            if (i < getChildCount() - 1) {
+                height += dividerHeightPx;
+            }
+        }
+        width += getPaddingLeft() + getPaddingRight();
+        setMeasuredDimension(resolveSize(width, widthMeasureSpec), resolveSize(height, heightMeasureSpec));
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+        int top = getPaddingTop();
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            if (child.getVisibility() == GONE) continue;
+            int childHeight = child.getMeasuredHeight();
+            child.layout(getPaddingLeft(), top, getPaddingLeft() + child.getMeasuredWidth(), top + childHeight);
+            top += childHeight;
+            if (i < getChildCount() - 1) {
+                // add spacing for the divider; the color is painted in onDraw
+                top += dividerHeightPx;
+            }
+        }
+        applyViewportToChildren();
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        return true;
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        scaleGestureDetector.onTouchEvent(event);
+        gestureDetector.onTouchEvent(event);
+
+        final int action = event.getActionMasked();
+        switch (action) {
+            case MotionEvent.ACTION_DOWN:
+                scroller.forceFinished(true);
+                lastTouchX = event.getX();
+                lastTouchY = event.getY();
+                isScrolling = false;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                float dx = event.getX() - lastTouchX;
+                float dy = event.getY() - lastTouchY;
+                if (!isScrolling) {
+                    if (Math.hypot(dx, dy) > touchSlop) {
+                        isScrolling = true;
+                    }
+                }
+                if (isScrolling && !scaleGestureDetector.isInProgress()) {
+                    panBy(dx, dy);
+                }
+                lastTouchX = event.getX();
+                lastTouchY = event.getY();
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                isScrolling = false;
+                break;
+            default:
+                break;
+        }
+        return true;
+    }
+
+    @Override
+    public void computeScroll() {
+        super.computeScroll();
+        if (scroller.computeScrollOffset()) {
+            float newX = scroller.getCurrX();
+            float newY = scroller.getCurrY();
+            updateViewport(newX, newY, globalScale);
+            postInvalidateOnAnimation();
+        }
+    }
+
+    private void panBy(float dx, float dy) {
+        updateViewport(globalPanX + dx, globalPanY + dy, globalScale);
+    }
+
+    private void updateViewport(float panX, float panY, float scale) {
+        globalPanX = panX;
+        globalPanY = panY;
+        globalScale = Math.max(minScale, Math.min(maxScale, scale));
+        applyViewportToChildren();
+        invalidate();
+    }
+
+    private void applyViewport(FixedHeaderTableLayout table) {
+        table.setExternalViewport(globalPanX, globalPanY, globalScale);
+    }
+
+    private void applyViewportToChildren() {
+        for (FixedHeaderTableLayout table : subtables) {
+            applyViewport(table);
+        }
+    }
+
+    private void fling(float velocityX, float velocityY) {
+        scroller.fling((int) globalPanX, (int) globalPanY,
+                (int) velocityX, (int) velocityY,
+                Integer.MIN_VALUE, Integer.MAX_VALUE,
+                Integer.MIN_VALUE, Integer.MAX_VALUE);
+        postInvalidateOnAnimation();
+    }
+
+    private class GestureListener extends GestureDetector.SimpleOnGestureListener {
+        @Override
+        public boolean onDown(MotionEvent e) {
+            return true;
+        }
+
+        @Override
+        public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
+            if (!scaleGestureDetector.isInProgress()) {
+                panBy(-distanceX, -distanceY);
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+            fling(velocityX, velocityY);
+            return true;
+        }
+    }
+
+    private class ScaleListener extends ScaleGestureDetector.SimpleOnScaleGestureListener {
+        @Override
+        public boolean onScale(ScaleGestureDetector detector) {
+            float newScale = globalScale * detector.getScaleFactor();
+            updateViewport(globalPanX, globalPanY, newScale);
+            return true;
+        }
     }
 }

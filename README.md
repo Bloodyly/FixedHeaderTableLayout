@@ -82,6 +82,49 @@ dependencies {
 
 Please check out the [project's wiki](https://github.com/Zardozz/FixedHeaderTableLayout/wiki).
 
+## Quick example: multiple subtables with custom dividers and spans
+
+The new `FixedHeaderTableContainer` lets you place several `FixedHeaderTableLayout` instances
+next to each other while keeping fixed rows/columns and column widths independent per subtable.
+
+```kotlin
+// In an Activity/Fragment
+val container = FixedHeaderTableContainer(this).apply {
+    setDividerWidthPx(12)
+    setDividerHeightPx(LayoutParams.MATCH_PARENT)
+    setDividerColor(Color.LTGRAY)
+}
+
+// First subtable with its own fixed header definition
+val leftTable = FixedHeaderTableLayout(this).apply {
+    setFixedHeaderCounts(fixedHeaderRowCount = 1, fixedHeaderColumnCount = 1)
+    setColumnWidthOverrides(SparseIntArray().apply { put(0, 180) })
+    // addViews(...) with your FixedHeaderSubTableLayout instances
+}
+
+// Second subtable can use different fixed headers and widths
+val rightTable = FixedHeaderTableLayout(this).apply {
+    setFixedHeaderCounts(fixedHeaderRowCount = 2, fixedHeaderColumnCount = 0)
+    setColumnWidthOverrides(SparseIntArray().apply {
+        put(1, 220) // wider description column
+    })
+    // addViews(...) with your FixedHeaderSubTableLayout instances
+}
+
+// Merge cells inside a row if needed
+val headerRow = FixedHeaderTableRow(this).apply {
+    mergeCells(startColumn = 0, span = 2) // spans first two columns
+}
+
+container.addSubTable(leftTable)
+container.addSubTable(rightTable)
+parentLayout.addView(container)
+```
+
+Each subtable can freely set explicit column widths (via `SparseIntArray` on the table or
+`setExplicitColumnWidths` on individual rows) and use `mergeCells` to combine adjacent cells.
+When no width is provided, the content-driven measurement is kept for that column.
+
 ## Contributors
 
 Contributions of any kind are welcome!

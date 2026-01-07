@@ -88,5 +88,9 @@ container.addSubTable(right)
 - Werden keine festen Spaltenbreiten vergeben, bleibt die Breite inhaltssensitiv.
 - Subtabellen können unterschiedliche Gesamtbreiten haben; der Container kümmert sich um die
   horizontale Ausrichtung und den definierten Abstand.
+- Werden mehrere Container untereinander gestapelt, bleiben sie standardmäßig linksbündig,
+  weil `FixedHeaderTableContainer` nur so breit wie sein Inhalt ist (`WRAP_CONTENT`). Eine
+  Zentrierung entsteht nur, wenn das umgebende Layout explizit `gravity="center"` o. Ä. nutzt;
+  für feste Linksbündigkeit kann dort `gravity="start"` gesetzt werden.
 - `clearMergedCells()` entfernt zuvor gesetzte Zellverbindungen, falls eine Zeile neu
   konfiguriert werden soll.
